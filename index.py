@@ -8,10 +8,20 @@
 
 # importacao das bibliotecas
 import socket
+from datetime import datetime
 
 # definicao do host e da porta do servidor
 HOST = '' # ip do servidor (em branco)
 PORT = 8080 # porta do servidor
+
+# Gera resposta do HEAD formatada
+def getHead(size, conn):
+    return """
+Date: %s
+Server: Meu Host /v1 (Redes - UFRN)
+Content-Length: %s
+Connection: %s
+""" % (datetime.utcnow().strftime("%a, %d %b %Y %H:%M:%S GMT"), size, conn)
 
 # cria o socket com IPv4 (AF_INET) usando TCP (SOCK_STREAM)
 listen_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -29,34 +39,66 @@ listen_socket.listen(1)
 print ("Serving HTTP on port %s ..." % PORT)
 
 # declaracao das respostas do servidor
-fileDoc = open('doc.html')
+fileDoc = open('doc.html', 'r')
 htmlDoc = "HTTP/1.1 200 OK \r\n\r\n%s\r\n" % fileDoc.read()
-file200 = open('200.html')
+sizeDoc = fileDoc.tell()
+fileDoc.close()
+file200 = open('200.html', 'r')
 html200 = "HTTP/1.1 200 OK \r\n\r\n%s\r\n" % file200.read()
-file400 = open('400.html')
+size200 = file200.tell()
+file200.close()
+file400 = open('400.html', 'r')
 html400 = "HTTP/1.1 400 Bad Request \r\n\r\n%s\r\n" % file400.read()
-file404 = open('404.html')
+file400.close()
+file404 = open('404.html', 'r')
 html404 = "HTTP/1.1 404 Not Found \r\n\r\n%s\r\n" % file404.read()
+size404 = file404.tell()
+file404.close()
 
 while True:
     # aguarda por novas conexoes
     client_connection, client_address = listen_socket.accept()
-    # o metodo .recv recebe os dados enviados por um cliente atraves do socket e converte em string
-    request = client_connection.recv(1024).decode()
-    # pega metodo e rota que o cliente enviou ao servidor
-    metodo = request.split(' ')[0]
-    rota = request.split(' ')[1]
-    # imprime na tela o que o cliente enviou ao servidor
-    print ("Nova requisicao de %s: %s %s" % (client_address, metodo, rota))
-    # retorno padrão para o cliente caso não satisfaça nenhuma condicao
+    # guarda todo o texto da requisicao
+    data = ''
+    # retorno padrão para o cliente caso nao satisfaça nenhuma condicao
     res = html400
-    if metodo.lower() == 'get':
-        if rota.lower() == '/' or rota.lower() == '/index.html':
+    while True:
+        # o metodo .recv recebe os dados enviados por um cliente atraves do socket e converte em string
+        request = client_connection.recv(1024).decode()
+        if request == '\r\n': # se deu apenas enter
+            if data == '': # se nao escreveu algo antes
+                continue
+            else: # se ja escreveu algo antes
+                break
+        else: # se escreveu e deu enter
+            data += request
+            continue
+        
+    # pega metodo, rota e conexao escrito pelo cliente
+    metodo = data.split(' ')[0]
+    rota = data.split(' ')[1] if len(data.split(' ')) > 1 else ''
+    connection = data.split('Connection:')[1] if len(data.split('Connection:')) > 1 else 'close'
+    connection = connection.strip() # remove espacos
+
+    # imprime na tela o que o cliente enviou ao servidor
+    print ("Requisicao de %s: Connection(%s); Metodo(%s); Rota(%s)" % (client_address, connection, metodo, rota))
+    
+    if rota.lower() == '/' or rota.lower() == '/index.html':
+        if metodo.lower() == 'get':
             res = html200
-        elif rota.lower() == '/doc' or rota.lower() == '/doc/' or rota.lower() == '/doc/index.html':
+        elif metodo.lower() == 'head':
+            res = getHead(size200, connection)
+    elif rota.lower() == '/doc' or rota.lower() == '/doc/' or rota.lower() == '/doc/index.html':
+        if metodo.lower() == 'get':
             res = htmlDoc
-        else:
+        elif metodo.lower() == 'head':
+            res = getHead(sizeDoc, connection)
+    else:
+        if metodo.lower() == 'get':
             res = html404
+        elif metodo.lower() == 'head':
+            res = getHead(size404, connection)
+
     # servidor retorna o que foi solicitado pelo cliente (neste caso a resposta e generica)
     client_connection.send(res.encode())
     # encerra a conexao
